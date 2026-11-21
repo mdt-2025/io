@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>.</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Reem+Kufi:wght@600&family=IBM+Plex+Sans+Arabic:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#F3EEE3;--surface:#FBF8F1;--ink:#1E2A38;--muted:#5E6B79;--accent:#9A5B13;--on-accent:#FBF8F1;--line:#D8CFBC;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){--bg:#141C26;--surface:#1D2733;--ink:#ECE5D4;--muted:#9AA7B5;--accent:#E0A458;--on-accent:#141C26;--line:#2E3B4A;color-scheme:dark}
+}
+:root[data-theme="dark"]{--bg:#141C26;--surface:#1D2733;--ink:#ECE5D4;--muted:#9AA7B5;--accent:#E0A458;--on-accent:#141C26;--line:#2E3B4A;color-scheme:dark}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 17px/1.7 "IBM Plex Sans Arabic",Tahoma,sans-serif}
+main{max-width:860px;margin:0 auto;padding:28px 18px 56px}
+h1{font:600 34px/1.3 "Reem Kufi",Tahoma,sans-serif;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 22px}
+.modes{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:14px}
+.modes button{font:inherit;font-weight:500;padding:8px 22px;border:0;background:transparent;color:var(--ink);cursor:pointer}
+.modes button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
+.pw{margin-bottom:16px}
+.pw .line{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+input[type=password],input[type=text]{flex:1;min-width:200px;padding:10px 14px;font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:10px;direction:ltr;text-align:left}
+.io{display:grid;gap:14px;grid-template-columns:1fr}
+@media(min-width:720px){.io{grid-template-columns:1fr 1fr}}
+label.box{display:block;font-weight:500;margin-bottom:4px}
+textarea{width:100%;min-height:150px;resize:vertical;padding:12px 14px;font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:10px}
+textarea#inp{direction:ltr;text-align:left;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:17px;word-break:break-all}
+textarea#out{direction:rtl;text-align:right}
+textarea:focus,input:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.btn{font:inherit;font-weight:500;padding:8px 18px;border-radius:10px;border:1px solid var(--accent);background:var(--accent);color:var(--on-accent);cursor:pointer}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+#note{color:var(--muted);min-height:1.7em;margin:10px 0 0;font-size:15px}
+#note.warn{color:var(--accent)}
+</style>
+</head>
+<body>
+<main>
+  <div class="row" style="margin:0 0 14px"><button class="btn" id="mEnc">فت</button></div>
+
+  <div class="io">
+    <div>
+      <label class="box" for="inp" id="inLabel">النص</label>
+      <textarea id="inp"></textarea>
+    </div>
+    <div>
+      <label class="box" for="out" id="outLabel">النتيجة</label>
+      <textarea id="out" readonly></textarea>
+    </div>
+  </div>
+  <div class="row">
+    <button class="btn" id="copy">نسخ النتيجة</button>
+  </div>
+  <p id="note" role="status"></p>
+
+</main>
+
+<script>
+const P = Array.from("ابتثجحخدذرزسشصضطظعغفقكلمنهوي" + "ءأإآؤئةى" + " " + "0123456789" + ".،؟!-؛:");
+const C = Array.from("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789");
+const N = C.length;                 // 56
+const LIM = 224;                    // 56 * 4، نرفض البايتات الأعلى لتجنب الانحياز
+const MARK = [P.indexOf("ن"), P.indexOf("ف")];
+const NONCE_LEN = 4;
+const enc = new TextEncoder();
+const $ = id => document.getElementById(id);
+const SECRET = "b8eCTk_guIYBVdlIIKzI4n5EGYW-Uvwb";
+let ticket = 0;
+
+async function keystream(pass, nonce, count){
+  const base = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    {name:"PBKDF2", hash:"SHA-256", salt: enc.encode("ar-cipher-v3:" + nonce), iterations:150000}, base, 256);
+  const key = await crypto.subtle.importKey("raw", bits, {name:"HMAC", hash:"SHA-256"}, false, ["sign"]);
+  const out = []; let ctr = 0;
+  while (out.length < count){
+    const blk = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode("blk" + ctr++)));
+    for (const b of blk){ if (b < LIM && out.length < count) out.push(b % N); }
+  }
+  return out;
+}
+
+async function decrypt(text, pass){
+  const chars = Array.from(text).filter(c => C.includes(c));
+  if (!chars.length) return {out:""};
+  if (chars.length < NONCE_LEN + MARK.length + 1) return {err:"✕"};
+  const nonce = chars.slice(0, NONCE_LEN).join("");
+  const body = chars.slice(NONCE_LEN).map(c => C.indexOf(c));
+  const ks = await keystream(pass, nonce, body.length);
+  const idx = body.map((v,i) => (v - ks[i] + N) % N);
+  if (idx[0] !== MARK[0] || idx[1] !== MARK[1] || idx.some(i => i >= P.length)) return {err:"✕"};
+  return {out: idx.slice(MARK.length).map(i => P[i]).join("")};
+}
+
+const REV = {"K3":"ا","R7":"ب","M2":"ت","X9":"ث","D4":"ج","F8":"ح","Z5":"خ","H6":"د","W1":"ذ","B9":"ر","T3":"ز","G7":"س","P2":"ش","N8":"ص","V4":"ض","C6":"ط","J5":"ظ","Y2":"ع","Q9":"غ","S1":"ف","L8":"ق","A4":"ك","E7":"ل","U3":"م","F2":"ن","D9":"ه","H3":"و","K8":"ي","M6":"ء","K5":"أ","K1":"إ","K6":"آ","H8":"ؤ","Z2":"ئ","D7":"ة","Y6":"ى"};
+function isLetters(t){ const tk = t.split(/[\s\/]+/).filter(Boolean); return tk.length > 0 && tk.every(x => x.length <= 2); }
+function letters(t){
+  const out = t.split("\n").map(line => line.split(/\s*\/\s*/).map(w => w.split(/\s+/).filter(Boolean).map(k => REV[k.toUpperCase()] ?? k).join("")).join(" ")).join("\n");
+  return {out};
+}
+
+function note(msg, warn){ $("note").textContent = msg || ""; $("note").className = warn ? "warn" : ""; }
+
+async function run(){
+  const my = ++ticket, pass = SECRET, text = $("inp").value;
+  if (!text.trim()){ $("out").value = ""; note(""); return; }
+  note("جاري المعالجة...");
+  try{
+    const r = isLetters(text) ? letters(text) : await decrypt(text, pass);
+    if (my !== ticket) return;
+    $("out").value = r.out || "";
+    if (r.err) note(r.err, true);
+    else note("");
+  }catch(e){ if (my === ticket) note("صار خطأ، جرّب مرة ثانية", true); }
+}
+
+$("mEnc").onclick = run;
+let timer = null;
+const sched = () => { clearTimeout(timer); timer = setTimeout(run, 300); };
+$("inp").addEventListener("input", sched);
+$("copy").onclick = async () => {
+  try { await navigator.clipboard.writeText($("out").value); note("تم النسخ"); }
+  catch (e) { $("out").select(); note("حدد النص وانسخه يدويًا", true); }
+};
+</script>
+</body>
+</html>
